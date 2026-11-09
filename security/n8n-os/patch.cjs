@@ -10,6 +10,20 @@ function snapshot(){const out={};let bytes=0;function walk(p){if(skip.has(p))ret
 function packages(){const text=fs.readFileSync('/lib/apk/db/installed','utf8'),out={};for(const block of text.split('\n\n')){const lines=block.split('\n');const name=lines.find(x=>x.startsWith('P:'))?.slice(2),version=lines.find(x=>x.startsWith('V:'))?.slice(2);if(name){if(!version||out[name])throw Error('Invalid package database');out[name]=version}}return out}
 function changed(a,b){return [...new Set([...Object.keys(a),...Object.keys(b)])].sort().filter(p=>JSON.stringify(a[p])!==JSON.stringify(b[p]))}
 function checked(args){return execFileSync('/tmp/tools/apk',args,{encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024,stdio:['ignore','pipe','pipe']})}
+const addPrefix=['--no-network','--no-cache','--keys-dir','/tmp/keys','--repositories-file','/dev/null','add','--upgrade'];
+function parserProbe(){
+ // apk 3.0.9 parses these flags before --print-arch exits, before DB prepare/open.
+ const architecture=checked([...addPrefix,'--print-arch']).trim();
+ if(architecture!=='x86_64')throw Error('APK parser architecture probe failed');
+ const sentinel='n8n-fixture-unknown-option';let rejected=false;
+ try{checked([...addPrefix,'--'+sentinel,'--print-arch'])}
+ catch(e){
+  if(e.status!==1||e.signal||String(e.stdout??'').trim()!==''||!String(e.stderr??'').includes("unrecognized option '"+sentinel+"'"))throw Error('APK parser negative probe failed');
+  rejected=true;
+ }
+ if(!rejected)throw Error('APK parser accepted an unknown option');
+ return {architecture,unknown_option_rejected:true,add_prefix:addPrefix};
+}
 let toolLink=false;
 try{
  if(process.getuid()!==0)throw Error('Patch process must be container root');
@@ -20,14 +34,13 @@ try{
 
  if(fs.existsSync('/sbin/apk'))throw Error('Unexpected existing package manager');
  const version=checked(['--version']);if(!/apk-tools 3\.0\.9\b/.test(version))throw Error('Static apk version mismatch');
- const help=checked(['--help'])+checked(['add','--help'])+checked(['verify','--help']);
- for(const flag of ['--no-network','--no-cache','--keys-dir','--repositories-file','--upgrade'])if(!help.includes(flag))throw Error('Unsupported apk flag: '+flag);
+ const parserEvidence=parserProbe();
  const apkFiles=input.allowed_changes.map(x=>'/tmp/apks/'+x.name+'-'+x.to+'.apk');
  checked(['--no-network','--keys-dir','/tmp/keys','verify',...apkFiles]);
  const before=snapshot(),beforePackages=packages();
  for(const x of input.allowed_changes)if(beforePackages[x.name]!==x.from)throw Error('Unexpected installed version: '+x.name);
  fs.symlinkSync('/tmp/tools/apk','/sbin/apk');toolLink=true;
- const transaction=checked(['--no-network','--no-cache','--keys-dir','/tmp/keys','--repositories-file','/dev/null','add','--upgrade',...apkFiles]);
+ const transaction=checked([...addPrefix,...apkFiles]);
  fs.unlinkSync('/sbin/apk');toolLink=false;
  const afterPackages=packages();
  const changes=changed(beforePackages,afterPackages);
@@ -48,6 +61,6 @@ try{
  if(appPaths.some(p=>JSON.stringify(before[p])!==JSON.stringify(after[p])))throw Error('Application bytes/metadata changed');
  if(Object.keys(after).some(p=>p.startsWith('/usr/local/lib/node_modules/n8n/')&&!before[p]))throw Error('Application file added');
  const treeHash=crypto.createHash('sha256').update(JSON.stringify(appPaths.sort().map(p=>[p,before[p]]))).digest('hex');
- console.log(JSON.stringify({state:'os_transaction_verified',effective_cgroup:resource,apk_version:version.trim(),before_packages:beforePackages,after_packages:afterPackages,application_tree_sha256:treeHash,application_entries:appPaths.length,delta:delta.map(p=>({path:p,before:before[p]??null,after:after[p]??null})),transaction_log:transaction},null,2));
+ console.log(JSON.stringify({state:'os_transaction_verified',effective_cgroup:resource,apk_version:version.trim(),parser_probe:parserEvidence,before_packages:beforePackages,after_packages:afterPackages,application_tree_sha256:treeHash,application_entries:appPaths.length,delta:delta.map(p=>({path:p,before:before[p]??null,after:after[p]??null})),transaction_log:transaction},null,2));
 }catch(e){console.error('OS transaction failed:',e.message);if(e.stderr)console.error(String(e.stderr).slice(-16384));process.exitCode=20}
 finally{if(toolLink){try{fs.unlinkSync('/sbin/apk')}catch{process.exitCode=20}}}
