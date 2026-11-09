@@ -77,8 +77,8 @@ def bounded(cmd, seconds, out, out_limit, err, err_limit=2*MIB):
             p.stdout.close()
             p.stderr.close()
 
-def extract_db(archive, dest):
-    allowed = {'db/trivy.db', 'db/metadata.json', 'java-db/trivy-java.db', 'java-db/metadata.json'}
+def extract_db(archive, dest, allowed=None, budget=DB_BUDGET):
+    allowed = allowed or {'db/trivy.db', 'db/metadata.json', 'java-db/trivy-java.db', 'java-db/metadata.json'}
     seen = set()
     total = 0
     with tarfile.open(archive, 'r:') as tar:
@@ -89,7 +89,7 @@ def extract_db(archive, dest):
             if name not in allowed or not member.isfile() or name in seen:
                 raise RuntimeError('Unexpected or unsafe DB archive member')
             total += member.size
-            if total > DB_BUDGET or member.size < 0:
+            if total > budget or member.size < 0:
                 raise RuntimeError('Expanded DB archive too large')
             if name.endswith('metadata.json') and member.size > MIB:
                 raise RuntimeError('DB metadata too large')
@@ -130,16 +130,17 @@ def main():
     common = ['--platform', 'linux/amd64', '--user', f'{uid}:{gid}', '--read-only',
               '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
               '--pids-limit', '128', '--memory', '6g', '--cpus', '2',
-              '--log-driver', 'none', '-e', 'HOME=/tmp', '--workdir', '/tmp',
-              '--tmpfs', f'/cache:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={DB_BUDGET}',
-              '--tmpfs', f'/tmp:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={TMP_BUDGET}']
-    def create(suffix, network, mounts, args, shell=False):
+              '--log-driver', 'none', '-e', 'HOME=/tmp', '--workdir', '/tmp']
+    def create(suffix, network, mounts, args, shell=False, cache_bytes=DB_BUDGET, tmp_bytes=TMP_BUDGET):
+        assert cache_bytes + tmp_bytes <= 5*GIB
         name = f'n8n-public-scan-{run}-{attempt}-{suffix}'
         # Listing is checked successfully first; missing-name cannot mask daemon failure.
         names = command(['docker', 'ps', '-a', '--format', '{{.Names}}'], name='names').splitlines()
         if name in names:
             raise RuntimeError('Container name collision')
-        cmd = ['docker', 'create', '--name', name, *common, '--network', network]
+        cmd = ['docker', 'create', '--name', name, *common, '--network', network,
+               '--tmpfs', f'/cache:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={cache_bytes}',
+               '--tmpfs', f'/tmp:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={tmp_bytes}']
         for mount in mounts:
             cmd += ['--mount', mount]
         if shell:
@@ -149,8 +150,8 @@ def main():
             raise RuntimeError('Uncertain container create result; refusing ID guessing')
         owned.append(cid)
         return cid
-    def start(cid, seconds, out, limit, log):
-        bounded(['docker', 'start', '--attach', cid], seconds, out, limit, log)
+    def start(cid, seconds, out, limit, log, log_limit=2*MIB):
+        bounded(['docker', 'start', '--attach', cid], seconds, out, limit, log, log_limit)
         info = json.loads(command(['docker', 'inspect', cid], name='inspect'))[0]
         if info['State']['Running'] or info['State']['ExitCode'] != 0:
             raise RuntimeError('Container did not complete successfully')
@@ -173,16 +174,35 @@ def main():
         if not re.search(r'^Version: 0\.76\.2$', (evidence/'scanner-version.txt').read_text(), re.M):
             raise RuntimeError('Scanner version mismatch')
         stage = 'public-database-download'
-        db_script = '''set -eu
-trivy image --cache-dir /cache --download-db-only --db-repository ghcr.io/aquasecurity/trivy-db:2 --disable-telemetry --skip-version-check --no-progress --timeout 5m >&2
-trivy image --cache-dir /cache --download-java-db-only --skip-db-update --java-db-repository ghcr.io/aquasecurity/trivy-java-db:1 --disable-telemetry --skip-version-check --no-progress --timeout 5m >&2
-tar -C /cache -cf - db/trivy.db db/metadata.json java-db/trivy-java.db java-db/metadata.json
-'''
-        # Networked downloader sees no host mount, image archive, source or credentials.
-        cid = create('db', 'bridge', [], ['-c', db_script], shell=True)
-        start(cid, 630, temp/'db.tar', DB_BUDGET, evidence/'db-download.log')
-        extract_db(temp/'db.tar', temp/'database')
-        (temp/'db.tar').unlink()
+        downloads = [
+            ('vuln', 'db', 'trivy.db', '--download-db-only --db-repository ghcr.io/aquasecurity/trivy-db:2'),
+            ('java', 'java-db', 'trivy-java.db', '--download-java-db-only --java-db-repository ghcr.io/aquasecurity/trivy-java-db:1'),
+        ]
+        status['resource_limits']['download_cache_bytes'] = 2*GIB
+        status['resource_limits']['download_tmp_bytes'] = 2*GIB
+        combined_log = evidence/'db-download.log'
+        combined_log.write_bytes(b'')
+        for kind, folder, filename, flags in downloads:
+            stage = 'public-database-download-' + kind
+            db_script = (f'set -eu; trivy image --cache-dir /cache {flags} '
+                         '--disable-telemetry --skip-version-check --no-progress --timeout 5m >&2; '
+                         f'tar -C /cache -cf - {folder}/{filename} {folder}/metadata.json')
+            # Each networked downloader sees no mounts or previous DB. Its cache
+            # and double-compressed temporary copies fit independent 2GiB bounds.
+            cid = create('db-'+kind, 'bridge', [], ['-c', db_script], shell=True,
+                         cache_bytes=2*GIB, tmp_bytes=2*GIB)
+            part_log = temp/(kind+'.log')
+            try:
+                start(cid, 330, temp/'db.tar', 2*GIB, part_log, log_limit=MIB)
+            finally:
+                if part_log.exists():
+                    with combined_log.open('ab') as f:
+                        f.write(part_log.read_bytes())
+            extract_db(temp/'db.tar', temp/'database',
+                       allowed={f'{folder}/{filename}', f'{folder}/metadata.json'}, budget=2*GIB)
+            (temp/'db.tar').unlink()
+            if sum(p.stat().st_size for p in (temp/'database').rglob('*') if p.is_file()) > DB_BUDGET:
+                raise RuntimeError('Combined database snapshot exceeds budget')
         status['databases'] = {}
         for path in sorted((temp/'database').rglob('*')):
             if path.is_file():
