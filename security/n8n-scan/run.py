@@ -16,6 +16,11 @@ import time
 
 MIB = 1024**2
 GIB = 1024**3
+DB_BUDGET = 3584*MIB
+TMP_BUDGET = 1536*MIB
+MEMORY_BUDGET = 6*GIB
+assert DB_BUDGET + TMP_BUDGET == 5*GIB
+assert DB_BUDGET + TMP_BUDGET < MEMORY_BUDGET
 SCANNER = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb'
 TARGET = 'n8nio/n8n@sha256:5d9f0cc5672b83d438c465f718077af463828c15563a480ef5c7c5fdfa2eae9c'
 EXPECTED_CHILD = 'sha256:553e3e97d163e4185792e5ac17da9ac50a90d22f26d7a7404feaf5db81ee1f0f'
@@ -84,7 +89,7 @@ def extract_db(archive, dest):
             if name not in allowed or not member.isfile() or name in seen:
                 raise RuntimeError('Unexpected or unsafe DB archive member')
             total += member.size
-            if total > 3*GIB or member.size < 0:
+            if total > DB_BUDGET or member.size < 0:
                 raise RuntimeError('Expanded DB archive too large')
             if name.endswith('metadata.json') and member.size > MIB:
                 raise RuntimeError('DB metadata too large')
@@ -113,7 +118,10 @@ def main():
     owned = []
     status = {'state': 'incomplete', 'started_at': now(), 'scanner': SCANNER, 'target': TARGET,
               'platform': 'linux/amd64', 'expected_target_child': EXPECTED_CHILD,
-              'options': OPTIONS, 'run_id': run, 'run_attempt': attempt}
+              'options': OPTIONS, 'run_id': run, 'run_attempt': attempt,
+              'resource_limits': {'database_bytes': DB_BUDGET, 'tmp_bytes': TMP_BUDGET,
+                                  'total_tmpfs_bytes': DB_BUDGET+TMP_BUDGET,
+                                  'container_memory_bytes': MEMORY_BUDGET}}
     stage = 'preflight'
     def command(args, seconds=30, name='control', limit=MIB):
         out, err = temp / (name+'.out'), evidence / (name+'.log')
@@ -123,8 +131,8 @@ def main():
               '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
               '--pids-limit', '128', '--memory', '6g', '--cpus', '2',
               '--log-driver', 'none', '-e', 'HOME=/tmp', '--workdir', '/tmp',
-              '--tmpfs', f'/cache:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size=3g',
-              '--tmpfs', f'/tmp:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size=2g']
+              '--tmpfs', f'/cache:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={DB_BUDGET}',
+              '--tmpfs', f'/tmp:rw,nosuid,nodev,noexec,uid={uid},gid={gid},mode=0700,size={TMP_BUDGET}']
     def create(suffix, network, mounts, args, shell=False):
         name = f'n8n-public-scan-{run}-{attempt}-{suffix}'
         # Listing is checked successfully first; missing-name cannot mask daemon failure.
@@ -172,7 +180,7 @@ tar -C /cache -cf - db/trivy.db db/metadata.json java-db/trivy-java.db java-db/m
 '''
         # Networked downloader sees no host mount, image archive, source or credentials.
         cid = create('db', 'bridge', [], ['-c', db_script], shell=True)
-        start(cid, 630, temp/'db.tar', 3*GIB, evidence/'db-download.log')
+        start(cid, 630, temp/'db.tar', DB_BUDGET, evidence/'db-download.log')
         extract_db(temp/'db.tar', temp/'database')
         (temp/'db.tar').unlink()
         status['databases'] = {}
