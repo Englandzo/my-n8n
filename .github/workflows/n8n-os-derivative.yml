@@ -22,6 +22,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+      - name: Validate benign freeze lifecycle before APK work
+        run: python3 security/n8n-os/preflight.py
       - name: Verify signed public OS packages and construct local derivative
         run: python3 security/n8n-os/build.py
       - name: Synthetic smoke against exact local image ID

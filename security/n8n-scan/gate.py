@@ -55,6 +55,10 @@ def main():
         cleanup = json.loads((root/'derivative-cleanup.json').read_text())
         if derivative.get('state') != 'derivative_verified' or not derivative.get('cleanup_ok') or not cleanup.get('cleanup_ok'):
             raise ValueError('Derivative verification or owned cleanup incomplete')
+        preflight_bytes=(root/'freeze-preflight.json').read_bytes()
+        preflight=json.loads(preflight_bytes)
+        if preflight.get('state')!='freeze_preflight_passed' or preflight.get('cleanup_ok') is not True or preflight.get('absence_verified') is not True or preflight.get('paused_cleanup_requested') is not True or type(preflight.get('cleanup_failures')) is not list or preflight['cleanup_failures']!=[] or derivative.get('freeze_preflight_sha256')!=hashlib.sha256(preflight_bytes).hexdigest():
+            raise ValueError('Freeze preflight missing or unbound')
         if execution.get('target') != derivative.get('image_id'):
             raise ValueError('Scan target differs from verified derivative')
         result = assess(json.loads(report_bytes), execution)
@@ -70,7 +74,7 @@ def main():
     for severity, values in result.get('counts_by_occurrence', {}).items():
         print(severity, 'fix available:', values['fix_available'], 'no fix reported:', values['no_fix_reported'])
     # Strict artifact allowlist, bounded total; no image/DB/archive/source uploads.
-    allowed = {'derivative.json','derivative-cleanup.json','os-delta.json','execution.json','report.json','summary.json','scanner-version.txt',
+    allowed = {'freeze-preflight.json','derivative.json','derivative-cleanup.json','os-delta.json','execution.json','report.json','summary.json','scanner-version.txt',
                'docker-info.log','scanner-pull.log','target-pull.log','image-inspect.log',
                'names.log','create.log','version.log','inspect.log','db-download.log',
                'image-save.log','isolation.log','scan.log'}

@@ -99,12 +99,91 @@ def commit_owned(cid,config,api,protected):
         raise RuntimeError('Commit returned protected/pre-existing image; refusing ownership')
     return identity
 
+def frozen_size(cid,deadline,record):
+    """Proposal only: no recovery/resume following any uncertain operation."""
+    def query(size=False,seconds=2,operation='state',cap=None):
+        args=['docker','container','inspect']+(['--size'] if size else [])+[cid]
+        info=json.loads(bounded(args,seconds=seconds,label=operation,
+            absolute_deadline=min(deadline,cap) if cap is not None else deadline))[0]
+        if info.get('Id')!=cid:raise RuntimeError('Observed container identity differs')
+        return info
+    record['freeze_stage']='checking-state'
+    # Keep initial state lookup AND pause request inside a shared two-second budget.
+    control_deadline=min(deadline,record['live_window_started']+2)
+    record['live_window_deadline']=control_deadline
+    confirmed_exit=record.get('confirmed_exit_cid')==cid
+    info=query(cap=deadline if confirmed_exit else control_deadline)
+    state=info.get('State',{})
+    if confirmed_exit and not (state.get('Status')=='exited' and state.get('Running') is False and state.get('ExitCode')==0):
+        raise RuntimeError('Previously completed container no longer exited successfully')
+    while state.get('Status')=='created' and state.get('Running') is False and record.get('startup_pending'):
+        # Only an observed never-started state is polled; errors are never retried.
+        if time.monotonic()>=control_deadline:raise RuntimeError('Startup running-window deadline exceeded')
+        time.sleep(min(.05,max(0,control_deadline-time.monotonic())))
+        info=query(cap=control_deadline);state=info.get('State',{})
+    record['startup_pending']=False
+    if state.get('Status')=='exited' and state.get('Running') is False and state.get('ExitCode')==0:
+        if not confirmed_exit:
+            record['last_live_window_seconds']=time.monotonic()-record['live_window_started']
+            record['maximum_live_window_seconds']=max(record.get('maximum_live_window_seconds',0),record['last_live_window_seconds'])
+            if time.monotonic()>control_deadline:raise RuntimeError('Completed running window exceeded deadline')
+            record['confirmed_exit_cid']=cid;record['confirmed_exit_at']=time.monotonic()
+        record['freeze_stage']='already-exited'
+        result=query(size=True,seconds=10,operation='exited size inspection')
+        if result.get('State',{}).get('Status')!='exited' or result['State'].get('Running') is not False or result['State'].get('ExitCode')!=0:
+            raise RuntimeError('Exited container state changed during measurement')
+        return result,False
+    if state.get('Status')!='running' or state.get('Running') is not True or state.get('Paused') is not False:
+        raise RuntimeError('Expected running or successfully exited owned container')
+    record['freeze_stage']='pause-pending'
+    bounded(['docker','pause',cid],seconds=2,label='pause request',absolute_deadline=control_deadline)
+    record['last_live_window_seconds']=time.monotonic()-record['live_window_started']
+    record['maximum_live_window_seconds']=max(record.get('maximum_live_window_seconds',0),record['last_live_window_seconds'])
+    if time.monotonic()>control_deadline:raise RuntimeError('Freeze acknowledged after running-window deadline')
+    record['freeze_stage']='confirming-pause'
+    info=query(operation='pause confirmation')
+    if info.get('State',{}).get('Paused') is not True or info['State'].get('Running') is not True:
+        raise RuntimeError('Pause acknowledgement not confirmed')
+    record['freeze_stage']='measuring-paused'
+    result=query(size=True,seconds=10,operation='paused size inspection')
+    if result.get('State',{}).get('Paused') is not True or result['State'].get('Running') is not True:
+        raise RuntimeError('Pause state lost during measurement')
+    return result,True
+
+def resume_verified(cid,deadline,record):
+    # Called only AFTER the measured thresholds have passed. Never in finally.
+    record['freeze_stage']='resume-pending'
+    record['live_window_started']=time.monotonic()
+    control_deadline=min(deadline,record['live_window_started']+2)
+    record['live_window_deadline']=control_deadline
+    bounded(['docker','unpause',cid],seconds=2,label='resume request',absolute_deadline=control_deadline)
+    info=json.loads(bounded(['docker','container','inspect',cid],seconds=2,
+        label='resume confirmation',absolute_deadline=control_deadline))[0]
+    state=info.get('State',{})
+    if info.get('Id')!=cid or state.get('Paused') is not False or not (
+        (state.get('Status')=='running' and state.get('Running') is True) or
+        (state.get('Status')=='exited' and state.get('Running') is False and state.get('ExitCode')==0)):
+        raise RuntimeError('Resume outcome not confirmed')
+    record['freeze_stage']='resumed-or-completed'
+
+def verify_preflight(record,run,attempt):
+    if record.get('state')!='freeze_preflight_passed' or record.get('cleanup_ok') is not True or record.get('absence_verified') is not True or record.get('paused_cleanup_requested') is not True or type(record.get('cleanup_failures')) is not list or record['cleanup_failures']!=[]:
+        raise RuntimeError('Freeze lifecycle preflight incomplete')
+    if record.get('run_id')!=run or record.get('run_attempt')!=attempt or record.get('base_image_id')!=INPUT['base_config']:
+        raise RuntimeError('Freeze preflight run/base binding differs')
+    if record.get('controller_sha256')!=sha(HERE/'build.py') or record.get('preflight_sha256')!=sha(HERE/'preflight.py'):
+        raise RuntimeError('Freeze preflight source binding differs')
+
 def main():
     os.umask(0o077);run=os.environ.get('GITHUB_RUN_ID','');attempt=os.environ.get('GITHUB_RUN_ATTEMPT','')
     if not re.fullmatch(r'\d+',run) or not re.fullmatch(r'\d+',attempt):raise RuntimeError('Numeric CI identity required')
-    if EVIDENCE.exists():raise RuntimeError('Evidence destination already exists')
-    EVIDENCE.mkdir();tmp=Path(tempfile.mkdtemp(prefix='n8n-public-os-',dir=os.environ['RUNNER_TEMP']))
-    owned=[];images=[];phase='preflight';result={'state':'incomplete','run_id':run,'run_attempt':attempt,'kernel_disk_quota':False,'capabilities':REQUIRED_CAPS,'base':INPUT['base'],'cleanup_ok':False}
+    if not EVIDENCE.is_dir() or {p.name for p in EVIDENCE.iterdir()}!={'freeze-preflight.json'}:
+        raise RuntimeError('Only preflight evidence may exist before construction')
+    preflight_path=EVIDENCE/'freeze-preflight.json'
+    if preflight_path.is_symlink() or preflight_path.stat().st_size>65536:raise RuntimeError('Invalid preflight evidence')
+    verify_preflight(json.loads(preflight_path.read_text()),run,attempt)
+    tmp=Path(tempfile.mkdtemp(prefix='n8n-public-os-',dir=os.environ['RUNNER_TEMP']))
+    owned=[];images=[];phase='preflight';result={'state':'incomplete','run_id':run,'run_attempt':attempt,'kernel_disk_quota':False,'capabilities':REQUIRED_CAPS,'base':INPUT['base'],'cleanup_ok':False,'freeze_preflight_sha256':sha(preflight_path)}
     def create(suffix,image,args,mounts=(),user='1000:1000',patch=False,tmpfs=True):
         name=f'n8n-os-{run}-{attempt}-{suffix}'
         names=bounded(['docker','ps','-a','--format','{{.Names}}']).decode().splitlines()
@@ -115,9 +194,10 @@ def main():
             for cap in REQUIRED_CAPS:command+=['--cap-add',cap]
         else:command+=['--read-only']
         for m in mounts:command+=['--mount',m]
+        result['container_create_outcome']='pending';result['container_create_name']=name
         cid=bounded([*command,'--entrypoint',args[0],image,*args[1:]]).decode().strip()
         if not valid_id(cid):raise RuntimeError('Uncertain container create outcome')
-        owned.append(cid);return cid
+        owned.append(cid);result['container_create_outcome']='confirmed';return cid
     try:
         if shutil.disk_usage(tmp).free<16*GIB:raise RuntimeError('Need at least 16 GiB free disk')
         if os.environ.get('DOCKER_HOST','unix:///var/run/docker.sock')!='unix:///var/run/docker.sock':raise RuntimeError('Remote Docker host forbidden')
@@ -184,7 +264,7 @@ def main():
         phase='offline-os-transaction'
         cid=create('patch',INPUT['base'],['/usr/bin/node','/tmp/fixture/patch.cjs'],[f'type=bind,src={HERE},dst=/tmp/fixture,readonly',f'type=bind,src={install},dst=/tmp/apks,readonly',f'type=bind,src={tool},dst=/tmp/tools/apk,readonly',f'type=bind,src={keys},dst=/tmp/keys,readonly'],user='0:0',patch=True)
         validate_patch_hostconfig(inspect('container',cid)['HostConfig'])
-        result['disk_watch']={'minimum_free_bytes':shutil.disk_usage(tmp).free,'maximum_writable_bytes':None,'kernel_quota':False,'completed_samples':0,'query_timeout_seconds':2,'quiescent_query_timeout_seconds':10,'interval_seconds':1}
+        result['disk_watch']={'minimum_free_bytes':shutil.disk_usage(tmp).free,'maximum_writable_bytes':None,'kernel_quota':False,'completed_samples':0,'control_timeout_seconds':2,'paused_size_timeout_seconds':10,'quiescent_query_timeout_seconds':10,'interval_seconds':1}
         transaction_deadline=time.monotonic()+300
         def watch(quiescent=False):
             record=result['disk_watch'];started=time.monotonic()
@@ -193,9 +273,11 @@ def main():
                 free=shutil.disk_usage(tmp).free
                 record['minimum_free_bytes']=min(record['minimum_free_bytes'],free)
                 validate_watch(free,0)
-                info=json.loads(bounded(['docker','container','inspect','--size',cid],seconds=10 if quiescent else 2,
-                    label='quiescent size inspection' if quiescent else 'running size inspection',
-                    absolute_deadline=None if quiescent else transaction_deadline))[0]
+                paused=False
+                if quiescent:
+                    info=json.loads(bounded(['docker','container','inspect','--size',cid],seconds=10,
+                        label='quiescent size inspection'))[0]
+                else:info,paused=frozen_size(cid,transaction_deadline,record)
                 if quiescent and (info.get('State',{}).get('Status')!='created' or info['State'].get('Running') is not False):
                     raise RuntimeError('Quiescent size check requires never-started container')
                 size=info.get('SizeRw')
@@ -205,14 +287,19 @@ def main():
                 record['maximum_writable_bytes']=max(record['maximum_writable_bytes'] or 0,size)
                 record['completed_samples']+=1
                 validate_watch(free,size)
+                if paused:resume_verified(cid,transaction_deadline,record)
                 record['last_query_state']='passed'
             except Exception as exc:
                 record['last_query_state']='failed';record['last_query_error']=str(exc)
+                if not quiescent and 'live_window_started' in record:
+                    record['failure_elapsed_since_live_window_start']=time.monotonic()-record['live_window_started']
                 raise
             finally:record['last_query_seconds']=time.monotonic()-started
         watch(quiescent=True) # Read before start; no guarantee of cache warmth.
         result['disk_watch']['quiescent_query_seconds']=result['disk_watch']['last_query_seconds']
         transaction_deadline=time.monotonic()+300
+        result['disk_watch']['startup_pending']=True
+        result['disk_watch']['live_window_started']=time.monotonic()
         patch=bounded(['docker','start','--attach',cid],300,8*MIB,watch,
             label='offline APK transaction',absolute_deadline=transaction_deadline)
         watch() # Require a final valid size observation before accepting the manifest.
@@ -237,13 +324,14 @@ def main():
         result['owned_image_ids']=images[:]
     except Exception as exc:
         result['error']=str(exc);result['state']='incomplete'
+        if result.get('container_create_outcome')=='pending':result['container_create_outcome']='uncertain; no retry or guessed deletion'
         if result.get('commit_outcome')=='pending':result['commit_outcome']='uncertain; no retry'
     finally:
         failures=remove_owned(owned,'container');result['container_cleanup_failures']=failures
         if failures:result['state']='incomplete'
         if result['state']!='derivative_verified':
             image_failures=remove_owned(images,'image');result['image_cleanup_failures']=image_failures
-        result['cleanup_ok']=not failures and not result.get('image_cleanup_failures') and result.get('commit_outcome')!='uncertain; no retry'
+        result['cleanup_ok']=not failures and not result.get('image_cleanup_failures') and result.get('commit_outcome')!='uncertain; no retry' and result.get('container_create_outcome') not in ('pending','uncertain; no retry or guessed deletion')
         result['phase']=phase
         (EVIDENCE/'derivative.json').write_text(json.dumps(result,indent=2)+'\n')
         shutil.rmtree(tmp)

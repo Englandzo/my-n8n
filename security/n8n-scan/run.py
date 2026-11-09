@@ -131,7 +131,7 @@ def main():
         raise RuntimeError('Non-root runner UID required')
     evidence = Path('scan-evidence')
     evidence.mkdir(exist_ok=True)
-    if {p.name for p in evidence.iterdir()} != {'derivative.json', 'os-delta.json'}:
+    if {p.name for p in evidence.iterdir()} != {'derivative.json', 'os-delta.json', 'freeze-preflight.json'}:
         raise RuntimeError('Unexpected pre-scan evidence')
     temp = Path(tempfile.mkdtemp(prefix='public-n8n-scan-', dir=os.environ['RUNNER_TEMP']))
     owned = []
