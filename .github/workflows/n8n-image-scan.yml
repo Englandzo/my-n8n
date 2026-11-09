@@ -1,7 +1,7 @@
 name: Offline n8n public image vulnerability scan
 on:
   push:
-    branches: [security/n8n-2-38-4-image-smoke]
+    branches: [security/n8n-2-46-6-image-validation]
     paths:
       - .github/workflows/n8n-image-scan.yml
       - security/n8n-scan/**
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   scan:
-    if: github.repository == 'Englandzo/my-n8n' && github.ref == 'refs/heads/security/n8n-2-38-4-image-smoke'
+    if: github.repository == 'Englandzo/my-n8n' && github.ref == 'refs/heads/security/n8n-2-46-6-image-validation'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:

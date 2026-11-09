@@ -28,7 +28,7 @@ if (require.main === module) {
   assert.match(fs.readFileSync('/tmp/import.log', 'utf8'), /Successfully imported 1 workflow\./);
   const exported = JSON.parse(fs.readFileSync('/tmp/export.json', 'utf8'));
   assert.equal(exported.length, 1);
-  assert.equal(exported[0].id, 'fixtureSmoke2384');
+  assert.equal(exported[0].id, 'fixtureSmoke2466');
   assert.equal(exported[0].active, false);
   assert.equal(exported[0].nodes.length, 2);
   assert.ok(exported[0].nodes.every(n => !n.credentials));
@@ -36,7 +36,7 @@ if (require.main === module) {
   const db = new DatabaseSync('/home/node/.n8n/database.sqlite', {readOnly: true});
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM workflow_entity').get().n, 1);
   const row = db.prepare('SELECT id, active FROM workflow_entity').get();
-  assert.equal(row.id, 'fixtureSmoke2384');
+  assert.equal(row.id, 'fixtureSmoke2466');
   assert.equal(row.active, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM credentials_entity').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user WHERE email IS NOT NULL OR password IS NOT NULL').get().n, 0);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-readonly image='n8nio/n8n@sha256:5d9f0cc5672b83d438c465f718077af463828c15563a480ef5c7c5fdfa2eae9c'
+readonly image='n8nio/n8n@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae'
 [[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ && ${GITHUB_RUN_ATTEMPT:-} =~ ^[0-9]+$ ]] || { echo "Numeric CI run ID and attempt required"; exit 1; }
 readonly prefix="n8n-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 readonly fixture="$(cd "$(dirname "$0")" && pwd)"
@@ -54,7 +54,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 if [ "$ready" != true ]; then docker logs --tail 100 "$prefix-server"; exit 1; fi
-[ "$(timeout 15 docker exec "$prefix-server" n8n --version)" = '2.38.4' ]
+[ "$(timeout 15 docker exec "$prefix-server" n8n --version)" = '2.46.6' ]
 [ "$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$prefix-server")" = none ]
 [ "$(docker port "$prefix-server" | wc -l)" -eq 0 ]
 timeout 30 docker stop --time 20 "$prefix-server" >/dev/null

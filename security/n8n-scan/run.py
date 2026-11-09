@@ -22,8 +22,8 @@ MEMORY_BUDGET = 6*GIB
 assert DB_BUDGET + TMP_BUDGET == 5*GIB
 assert DB_BUDGET + TMP_BUDGET < MEMORY_BUDGET
 SCANNER = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb'
-TARGET = 'n8nio/n8n@sha256:5d9f0cc5672b83d438c465f718077af463828c15563a480ef5c7c5fdfa2eae9c'
-EXPECTED_CHILD = 'sha256:553e3e97d163e4185792e5ac17da9ac50a90d22f26d7a7404feaf5db81ee1f0f'
+TARGET = 'n8nio/n8n@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae'
+EXPECTED_CHILD = 'sha256:256a0fca38c4f0ab02524bcebf77b8ed5acc7aa99a28c4cbca7a4034a76d4b97'
 OPTIONS = ['image', '--cache-dir', '/cache', '--input', '/input/image.tar',
            '--scanners', 'vuln', '--pkg-types', 'os,library', '--offline-scan',
            '--skip-db-update', '--skip-java-db-update', '--skip-version-check',

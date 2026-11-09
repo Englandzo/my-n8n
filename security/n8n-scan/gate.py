@@ -23,7 +23,7 @@ def assess(report, execution):
     if not {'os-pkgs', 'lang-pkgs'}.issubset(classes):
         raise ValueError('Both OS and library inventories required')
     packages = [p for r in results for p in r.get('Packages', [])]
-    if not any(p.get('Name') == 'n8n' and p.get('Version') == '2.38.4' for p in packages):
+    if not any(p.get('Name') == 'n8n' and p.get('Version') == '2.46.6' for p in packages):
         raise ValueError('Expected n8n package version absent from inventory')
     counts = {s: {'fix_available': 0, 'no_fix_reported': 0} for s in SEVERITIES}
     affected = set()
