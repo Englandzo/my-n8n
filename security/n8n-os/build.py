@@ -49,6 +49,14 @@ def verify_config(base,derived):
     # Exact dictionary comparison catches extra env/labels or null/empty Cmd drift.
     if base!=derived:raise RuntimeError('Committed image Config differs from base')
 
+def record_disk_space(result,stage,path):
+    usage=shutil.disk_usage(path)
+    sample={'stage':stage,'free_bytes':usage.free,'required_free_bytes':16*GIB,
+            'monotonic_seconds':time.monotonic()}
+    result.setdefault('disk_space_samples',[]).append(sample)
+    if usage.free<16*GIB:raise RuntimeError(f'{stage}: need at least 16 GiB free disk; observed {usage.free} bytes')
+    return sample
+
 def validate_watch(free,writable):
     if free<8*GIB:raise RuntimeError('Free disk watchdog threshold crossed')
     if writable<0 or writable>256*MIB:raise RuntimeError('Writable layer watchdog threshold crossed')
@@ -199,7 +207,7 @@ def main():
         if not valid_id(cid):raise RuntimeError('Uncertain container create outcome')
         owned.append(cid);result['container_create_outcome']='confirmed';return cid
     try:
-        if shutil.disk_usage(tmp).free<16*GIB:raise RuntimeError('Need at least 16 GiB free disk')
+        record_disk_space(result,'build_start',tmp)
         if os.environ.get('DOCKER_HOST','unix:///var/run/docker.sock')!='unix:///var/run/docker.sock':raise RuntimeError('Remote Docker host forbidden')
         endpoint=bounded(['docker','context','inspect','--format','{{.Endpoints.docker.Host}}']).decode().strip()
         if endpoint!='unix:///var/run/docker.sock':raise RuntimeError('Unexpected Docker context endpoint')
@@ -207,7 +215,10 @@ def main():
         api=engine['ApiVersion']
         if not re.fullmatch(r'1\.\d+',api):raise RuntimeError('Unsupported Docker API format')
         phase='pull-public-base-tools'
-        for image in [INPUT['base'],INPUT['tools_image']]:bounded(['docker','pull','--platform','linux/amd64',image],300,2*MIB)
+        for index,image in enumerate([INPUT['base'],INPUT['tools_image']]):
+            record_disk_space(result,f'build_before_pull_{index}',tmp)
+            bounded(['docker','pull','--platform','linux/amd64',image],300,2*MIB)
+            record_disk_space(result,f'build_after_pull_{index}',tmp)
         base=inspect('image',INPUT['base']);tools=inspect('image',INPUT['tools_image'])
         if base['Id']!=INPUT['base_config'] or base['Architecture']!='amd64' or base['Os']!='linux':raise RuntimeError('Base identity mismatch')
         if tools['Architecture']!='amd64' or tools['Os']!='linux' or tools['Size']>128*MIB:raise RuntimeError('Unexpected tools image platform/size')

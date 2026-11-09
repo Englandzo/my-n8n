@@ -2,7 +2,7 @@
 """One benign, read-only lifecycle gate. No APK execution or image creation."""
 import json,os,re,shutil,sys,time
 from pathlib import Path
-from build import INPUT,HERE,EVIDENCE,GIB,MIB,bounded,inspect,valid_id,remove_owned,sha,frozen_size,resume_verified,validate_watch
+from build import INPUT,HERE,EVIDENCE,GIB,MIB,bounded,inspect,valid_id,remove_owned,sha,frozen_size,resume_verified,validate_watch,record_disk_space
 
 def main():
     os.umask(0o077)
@@ -12,10 +12,11 @@ def main():
     EVIDENCE.mkdir();owned=[]
     result={'state':'incomplete','run_id':run,'run_attempt':attempt,'cleanup_ok':False,'phase':'preflight','kernel_disk_quota':False}
     try:
-        if shutil.disk_usage(os.environ['RUNNER_TEMP']).free<16*GIB:raise RuntimeError('Need 16 GiB free disk')
+        record_disk_space(result,'preflight_before_pull',os.environ['RUNNER_TEMP'])
         if os.environ.get('DOCKER_HOST','unix:///var/run/docker.sock')!='unix:///var/run/docker.sock':raise RuntimeError('Remote Docker host forbidden')
         if bounded(['docker','context','inspect','--format','{{.Endpoints.docker.Host}}']).decode().strip()!='unix:///var/run/docker.sock':raise RuntimeError('Unexpected Docker context')
         bounded(['docker','pull','--platform','linux/amd64',INPUT['base']],300,2*MIB)
+        record_disk_space(result,'preflight_after_pull',os.environ['RUNNER_TEMP'])
         image=inspect('image',INPUT['base'])
         if image['Id']!=INPUT['base_config'] or image['Architecture']!='amd64' or image['Os']!='linux':raise RuntimeError('Unexpected base image')
         result['base_image_id']=image['Id']

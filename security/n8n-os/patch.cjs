@@ -1,7 +1,7 @@
 'use strict';
 // Only public vendor image bytes and signature-verified APKs are available here.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {execFileSync}=require('node:child_process');
+const {execFileSync,spawnSync}=require('node:child_process');
 const input=JSON.parse(fs.readFileSync('/tmp/fixture/inputs.json','utf8'));
 const skip=new Set(['/proc','/sys','/dev','/tmp']);
 const limit=3*1024**3;
@@ -10,7 +10,20 @@ function snapshot(){const out={};let bytes=0;function walk(p){if(skip.has(p))ret
 function packages(){const text=fs.readFileSync('/lib/apk/db/installed','utf8'),out={};for(const block of text.split('\n\n')){const lines=block.split('\n');const name=lines.find(x=>x.startsWith('P:'))?.slice(2),version=lines.find(x=>x.startsWith('V:'))?.slice(2);if(name){if(!version||out[name])throw Error('Invalid package database');out[name]=version}}return out}
 function changed(a,b){return [...new Set([...Object.keys(a),...Object.keys(b)])].sort().filter(p=>JSON.stringify(a[p])!==JSON.stringify(b[p]))}
 function checked(args){return execFileSync('/tmp/tools/apk',args,{encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024,stdio:['ignore','pipe','pipe']})}
-const addPrefix=['--no-network','--no-cache','--keys-dir','/tmp/keys','--repositories-file','/dev/null','add','--upgrade'];
+function captureTransaction(args){
+ const outputLimit=2*1024*1024;
+ const r=spawnSync('/tmp/tools/apk',args,{timeout:180000,killSignal:'SIGKILL',maxBuffer:outputLimit,stdio:['ignore','pipe','pipe']});
+ const stdout=Buffer.isBuffer(r.stdout)?r.stdout:Buffer.alloc(0),stderr=Buffer.isBuffer(r.stderr)?r.stderr:Buffer.alloc(0);
+ const evidence={status:r.status,signal:r.signal??null,error_code:r.error?.code??null,stdout_bytes:stdout.length,stderr_bytes:stderr.length,output_limit_bytes:outputLimit,timeout_ms:180000};
+ if(r.error||r.signal||r.status!==0||!Buffer.isBuffer(r.stdout)||!Buffer.isBuffer(r.stderr)||stdout.length+stderr.length>outputLimit){
+  // Keep a bounded structured diagnostic even when the complete output is invalid.
+  evidence.stdout_tail=stdout.subarray(-512).toString('utf8');evidence.stderr_tail=stderr.subarray(-512).toString('utf8');
+  evidence.state='transaction_failed';
+  const e=Error('APK transaction failed or exceeded execution/output bounds');e.transactionEvidence=evidence;throw e;
+ }
+ return {...evidence,stdout:stdout.toString('utf8'),stderr:stderr.toString('utf8')};
+}
+const addPrefix=['--no-network','--no-cache','--no-logfile','--keys-dir','/tmp/keys','--repositories-file','/dev/null','add','--upgrade'];
 function parserProbe(){
  // apk 3.0.9 parses these flags before --print-arch exits, before DB prepare/open.
  const architecture=checked([...addPrefix,'--print-arch']).trim();
@@ -24,7 +37,7 @@ function parserProbe(){
  if(!rejected)throw Error('APK parser accepted an unknown option');
  return {architecture,unknown_option_rejected:true,add_prefix:addPrefix};
 }
-let toolLink=false;
+let toolLink=false,transactionEvidence=null;
 try{
  if(process.getuid()!==0)throw Error('Patch process must be container root');
  const cg='/sys/fs/cgroup/';
@@ -40,7 +53,7 @@ try{
  const before=snapshot(),beforePackages=packages();
  for(const x of input.allowed_changes)if(beforePackages[x.name]!==x.from)throw Error('Unexpected installed version: '+x.name);
  fs.symlinkSync('/tmp/tools/apk','/sbin/apk');toolLink=true;
- const transaction=checked([...addPrefix,...apkFiles]);
+ const transaction=captureTransaction([...addPrefix,...apkFiles]);transactionEvidence=transaction;
  fs.unlinkSync('/sbin/apk');toolLink=false;
  const afterPackages=packages();
  const changes=changed(beforePackages,afterPackages);
@@ -61,6 +74,6 @@ try{
  if(appPaths.some(p=>JSON.stringify(before[p])!==JSON.stringify(after[p])))throw Error('Application bytes/metadata changed');
  if(Object.keys(after).some(p=>p.startsWith('/usr/local/lib/node_modules/n8n/')&&!before[p]))throw Error('Application file added');
  const treeHash=crypto.createHash('sha256').update(JSON.stringify(appPaths.sort().map(p=>[p,before[p]]))).digest('hex');
- console.log(JSON.stringify({state:'os_transaction_verified',effective_cgroup:resource,apk_version:version.trim(),parser_probe:parserEvidence,before_packages:beforePackages,after_packages:afterPackages,application_tree_sha256:treeHash,application_entries:appPaths.length,delta:delta.map(p=>({path:p,before:before[p]??null,after:after[p]??null})),transaction_log:transaction},null,2));
-}catch(e){console.error('OS transaction failed:',e.message);if(e.stderr)console.error(String(e.stderr).slice(-16384));process.exitCode=20}
+ console.log(JSON.stringify({state:'os_transaction_verified',effective_cgroup:resource,apk_version:version.trim(),parser_probe:parserEvidence,before_packages:beforePackages,after_packages:afterPackages,application_tree_sha256:treeHash,application_entries:appPaths.length,delta:delta.map(p=>({path:p,before:before[p]??null,after:after[p]??null})),transaction_output:transaction},null,2));
+}catch(e){console.error('OS transaction failed:',e.message);if(e.transactionEvidence)console.error(JSON.stringify(e.transactionEvidence));else if(transactionEvidence)console.error(JSON.stringify({state:'post_transaction_validation_failed',status:transactionEvidence.status,stdout_bytes:transactionEvidence.stdout_bytes,stderr_bytes:transactionEvidence.stderr_bytes,stdout_tail:transactionEvidence.stdout.slice(-512),stderr_tail:transactionEvidence.stderr.slice(-512)}));if(e.stderr)console.error(String(e.stderr).slice(-16384));process.exitCode=20}
 finally{if(toolLink){try{fs.unlinkSync('/sbin/apk')}catch{process.exitCode=20}}}
