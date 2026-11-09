@@ -22,7 +22,7 @@ MEMORY_BUDGET = 6*GIB
 assert DB_BUDGET + TMP_BUDGET == 5*GIB
 assert DB_BUDGET + TMP_BUDGET < MEMORY_BUDGET
 SCANNER = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb'
-TARGET = 'n8nio/n8n@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae'
+TARGET = None  # Read only the locally verified derivative identity in main().
 EXPECTED_CHILD = 'sha256:256a0fca38c4f0ab02524bcebf77b8ed5acc7aa99a28c4cbca7a4034a76d4b97'
 OPTIONS = ['image', '--cache-dir', '/cache', '--input', '/input/image.tar',
            '--scanners', 'vuln', '--pkg-types', 'os,library', '--offline-scan',
@@ -114,6 +114,13 @@ def extract_db(archive, dest, allowed=None, budget=DB_BUDGET):
 
 
 def main():
+    global TARGET
+    derivative = json.loads(Path('scan-evidence/derivative.json').read_text())
+    if derivative.get('state') != 'derivative_verified' or not derivative.get('cleanup_ok'):
+        raise RuntimeError('Derivative verification incomplete')
+    TARGET = derivative.get('image_id', '')
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', TARGET):
+        raise RuntimeError('Invalid local derivative image ID')
     os.umask(0o077)
     run = os.environ.get('GITHUB_RUN_ID', '')
     attempt = os.environ.get('GITHUB_RUN_ATTEMPT', '')
@@ -123,11 +130,13 @@ def main():
     if uid == 0:
         raise RuntimeError('Non-root runner UID required')
     evidence = Path('scan-evidence')
-    evidence.mkdir(exist_ok=False)
+    evidence.mkdir(exist_ok=True)
+    if {p.name for p in evidence.iterdir()} != {'derivative.json', 'os-delta.json'}:
+        raise RuntimeError('Unexpected pre-scan evidence')
     temp = Path(tempfile.mkdtemp(prefix='public-n8n-scan-', dir=os.environ['RUNNER_TEMP']))
     owned = []
     status = {'state': 'incomplete', 'started_at': now(), 'scanner': SCANNER, 'target': TARGET,
-              'platform': 'linux/amd64', 'expected_target_child': EXPECTED_CHILD,
+              'platform': 'linux/amd64', 'base_target_child': EXPECTED_CHILD,
               'options': OPTIONS, 'run_id': run, 'run_attempt': attempt,
               'resource_limits': {'database_bytes': DB_BUDGET, 'tmp_bytes': TMP_BUDGET,
                                   'total_tmpfs_bytes': DB_BUDGET+TMP_BUDGET,
@@ -171,8 +180,10 @@ def main():
         command(['docker', 'info'], name='docker-info')
         stage = 'pull-public-images'
         command(['docker', 'pull', '--platform', 'linux/amd64', SCANNER], 300, 'scanner-pull')
-        command(['docker', 'pull', '--platform', 'linux/amd64', TARGET], 300, 'target-pull')
+        # No target pull: analyze the verified local derivative only.
         inspect = json.loads(command(['docker', 'image', 'inspect', SCANNER, TARGET], name='image-inspect'))
+        if inspect[1]['Id'] != TARGET:
+            raise RuntimeError('Derivative identity mismatch')
         # Inspect contains public image metadata only. No container or host environment exported.
         status['images'] = [{'id': i['Id'], 'repo_digests': i['RepoDigests'], 'os': i['Os'],
                              'arch': i['Architecture'], 'size_bytes': i['Size']} for i in inspect]

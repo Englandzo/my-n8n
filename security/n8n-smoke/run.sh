@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-readonly image='n8nio/n8n@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae'
+image=$(python3 -c 'import json,re; d=json.load(open("scan-evidence/derivative.json")); assert d["state"]=="derivative_verified" and d["cleanup_ok"]; i=d["image_id"]; assert re.fullmatch("sha256:[0-9a-f]{64}",i); print(i)')
+readonly image
+[ "$(docker image inspect -f '{{.Id}}' "$image")" = "$image" ]
 [[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ && ${GITHUB_RUN_ATTEMPT:-} =~ ^[0-9]+$ ]] || { echo "Numeric CI run ID and attempt required"; exit 1; }
 readonly prefix="n8n-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 readonly fixture="$(cd "$(dirname "$0")" && pwd)"
@@ -20,7 +22,7 @@ done
 trap cleanup EXIT
 # Image download is the only network-using stage; application containers have none.
 [ "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 10485760 ] || { echo "Need at least 10 GiB free disk"; exit 1; }
-timeout 300 docker pull --platform linux/amd64 "$image"
+# No pull: only the verified local derivative image ID is permitted.
 args=(--platform linux/amd64 --network none --user 1000:1000 --cap-drop ALL
   --security-opt no-new-privileges --read-only --pids-limit 256 --memory 3g --cpus 2
   --tmpfs /home/node/.n8n:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=512m

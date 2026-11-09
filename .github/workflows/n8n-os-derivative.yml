@@ -1,0 +1,46 @@
+name: Isolated n8n OS derivative experiment
+on:
+  push:
+    branches: [security/n8n-2-46-6-os-validation]
+    paths:
+      - .github/workflows/n8n-os-derivative.yml
+      - security/n8n-os/**
+      - security/n8n-smoke/**
+      - security/n8n-scan/**
+permissions:
+  contents: read
+concurrency:
+  group: n8n-os-derivative-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'Englandzo/my-n8n' && github.ref == 'refs/heads/security/n8n-2-46-6-os-validation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify signed public OS packages and construct local derivative
+        run: python3 security/n8n-os/build.py
+      - name: Synthetic smoke against exact local image ID
+        run: bash security/n8n-smoke/run.sh
+      - name: Full offline scan of the same local image ID
+        run: python3 security/n8n-scan/run.py
+      - name: Remove only the owned derivative image
+        if: ${{ always() && !cancelled() }}
+        run: python3 security/n8n-os/cleanup.py
+      - name: Separate findings from incomplete work
+        if: ${{ always() && !cancelled() }}
+        run: python3 security/n8n-scan/gate.py
+      - name: Preserve bounded evidence only
+        if: ${{ always() && !cancelled() && hashFiles('scan-evidence/UPLOAD_READY') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: n8n-os-derivative-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scan-evidence/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          include-hidden-files: false

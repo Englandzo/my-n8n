@@ -50,7 +50,14 @@ def main():
         if report_path.stat().st_size > 16*MIB:
             raise ValueError('Full report exceeds read budget')
         report_bytes = report_path.read_bytes()
-        result = assess(json.loads(report_bytes), json.loads((root/'execution.json').read_text()))
+        execution = json.loads((root/'execution.json').read_text())
+        derivative = json.loads((root/'derivative.json').read_text())
+        cleanup = json.loads((root/'derivative-cleanup.json').read_text())
+        if derivative.get('state') != 'derivative_verified' or not derivative.get('cleanup_ok') or not cleanup.get('cleanup_ok'):
+            raise ValueError('Derivative verification or owned cleanup incomplete')
+        if execution.get('target') != derivative.get('image_id'):
+            raise ValueError('Scan target differs from verified derivative')
+        result = assess(json.loads(report_bytes), execution)
         result['report_sha256'] = hashlib.sha256(report_bytes).hexdigest()
         code = 10 if result['state'] == 'policy_findings' else 0
     except Exception as exc:
@@ -63,7 +70,7 @@ def main():
     for severity, values in result.get('counts_by_occurrence', {}).items():
         print(severity, 'fix available:', values['fix_available'], 'no fix reported:', values['no_fix_reported'])
     # Strict artifact allowlist, bounded total; no image/DB/archive/source uploads.
-    allowed = {'execution.json','report.json','summary.json','scanner-version.txt',
+    allowed = {'derivative.json','derivative-cleanup.json','os-delta.json','execution.json','report.json','summary.json','scanner-version.txt',
                'docker-info.log','scanner-pull.log','target-pull.log','image-inspect.log',
                'names.log','create.log','version.log','inspect.log','db-download.log',
                'image-save.log','isolation.log','scan.log'}

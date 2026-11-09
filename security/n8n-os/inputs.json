@@ -1,0 +1,235 @@
+{
+  "tools_image": "alpine@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf",
+  "base": "n8nio/n8n@sha256:8602f5dfacbe2c931eeafd010de0e68182310e9f309921e780ab69182e92b3ae",
+  "base_config": "sha256:941cefd8db2e3fbaed43fb01336077a807aa54c593858772a1e5c93f345a881c",
+  "packages": [
+    {
+      "name": "brotli-libs",
+      "version": "1.2.1-r0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/brotli-libs-1.2.1-r0.apk",
+      "bytes": 429435,
+      "sha256": "62a7e37e43bbfc1f8525a00ad2125fd5897135dc93b849733884cb78ffd8e26c"
+    },
+    {
+      "name": "libcurl",
+      "version": "8.23.0-r0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libcurl-8.23.0-r0.apk",
+      "bytes": 364567,
+      "sha256": "1f70ca404818805a6465b615bbfe84ef861488a963d7e630108ebd7fbaa51665"
+    },
+    {
+      "name": "libexpat",
+      "version": "2.10.0-r0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libexpat-2.10.0-r0.apk",
+      "bytes": 63634,
+      "sha256": "e7e7408ea787ed06d00159b0ff1f9b65a63cf634f36d9e0fa7512ce2c489a503"
+    },
+    {
+      "name": "openssh",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-10.3_p1-r2.apk",
+      "bytes": 104830,
+      "sha256": "c1968ed8237f3e007e691b7f0a76728cad23279cf153e9802fe1b08b34c3385d"
+    },
+    {
+      "name": "openssh-client-common",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-common-10.3_p1-r2.apk",
+      "bytes": 728647,
+      "sha256": "a9ebee31a425b91bd8b83e0228e365c6a256a67a50773420a8cc983c6e51eaaa"
+    },
+    {
+      "name": "openssh-client-default",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-default-10.3_p1-r2.apk",
+      "bytes": 350772,
+      "sha256": "efef3c1719e2d399f5194151004712e6e107d4daa6dce2474b62573cec8854d3"
+    },
+    {
+      "name": "openssh-keygen",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-keygen-10.3_p1-r2.apk",
+      "bytes": 172179,
+      "sha256": "36514ce00e23687be640ce57e40a963539538ddc49980b7fe9fb0b2058c4a8fb"
+    },
+    {
+      "name": "openssh-server",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-10.3_p1-r2.apk",
+      "bytes": 880603,
+      "sha256": "7dc84afcffa8596df65bbfc80a0615a9bc0a6c3ae959e1491b558712ec3ecbf5"
+    },
+    {
+      "name": "openssh-server-common",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-common-10.3_p1-r2.apk",
+      "bytes": 3183,
+      "sha256": "43a7d4f5ca2d4fc743ef7cdded0789d603433f0e9392c0d3a8b3e098cf335a99"
+    },
+    {
+      "name": "openssh-sftp-server",
+      "version": "10.3_p1-r2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-sftp-server-10.3_p1-r2.apk",
+      "bytes": 62432,
+      "sha256": "2d97de275784c7d85c4e796a4a5992dbc4bb813ba64cb137a8dfaa7131805290"
+    },
+    {
+      "name": "apk-tools-static",
+      "version": "3.0.9-r0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/apk-tools-static-3.0.9-r0.apk",
+      "bytes": 2225910,
+      "sha256": "0a1a0682375f66a83b7b903f6e4638ccfe312547d50d336b5f2be9fc391281be"
+    }
+  ],
+  "allowed_changes": [
+    {
+      "name": "brotli-libs",
+      "from": "1.2.0-r1",
+      "to": "1.2.1-r0",
+      "depends": "so:libc.musl-x86_64.so.1",
+      "provides": "so:libbrotlicommon.so.1=1.2.1 so:libbrotlidec.so.1=1.2.1 so:libbrotlienc.so.1=1.2.1",
+      "installed_files": [
+        "usr/lib/libbrotlicommon.so.1",
+        "usr/lib/libbrotlicommon.so.1.2.0",
+        "usr/lib/libbrotlidec.so.1",
+        "usr/lib/libbrotlidec.so.1.2.0",
+        "usr/lib/libbrotlienc.so.1",
+        "usr/lib/libbrotlienc.so.1.2.0"
+      ]
+    },
+    {
+      "name": "libcurl",
+      "from": "8.22.0-r0",
+      "to": "8.23.0-r0",
+      "depends": "ca-certificates-bundle so:libbrotlidec.so.1 so:libc.musl-x86_64.so.1 so:libcares.so.2 so:libcrypto.so.3 so:libidn2.so.0 so:libnghttp2.so.14 so:libpsl.so.5 so:libssl.so.3 so:libz.so.1 so:libzstd.so.1",
+      "provides": "so:libcurl.so.4=4.8.0",
+      "installed_files": [
+        "usr/lib/libcurl.so.4",
+        "usr/lib/libcurl.so.4.8.0"
+      ]
+    },
+    {
+      "name": "libexpat",
+      "from": "2.9.0-r1",
+      "to": "2.10.0-r0",
+      "depends": "so:libc.musl-x86_64.so.1",
+      "provides": "so:libexpat.so.1=1.13.1",
+      "installed_files": [
+        "usr/lib/libexpat.so.1",
+        "usr/lib/libexpat.so.1.13.0"
+      ]
+    },
+    {
+      "name": "openssh",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "openssh-client openssh-sftp-server openssh-server so:libc.musl-x86_64.so.1 so:libcrypto.so.3",
+      "provides": "",
+      "installed_files": [
+        "usr/lib/ssh/ssh-pkcs11-helper"
+      ]
+    },
+    {
+      "name": "openssh-client-common",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "libcrypto3>=3.1.0 so:libc.musl-x86_64.so.1 so:libcrypto.so.3 so:libedit.so.0 so:libz.so.1",
+      "provides": "cmd:findssl.sh=10.3_p1-r2 cmd:scp=10.3_p1-r2 cmd:sftp=10.3_p1-r2 cmd:ssh-add=10.3_p1-r2 cmd:ssh-agent=10.3_p1-r2 cmd:ssh-copy-id=10.3_p1-r2 cmd:ssh-keyscan=10.3_p1-r2 cmd:ssh-pkcs11-helper=10.3_p1-r2",
+      "installed_files": [
+        "etc/ssh/moduli",
+        "etc/ssh/ssh_config",
+        "usr/bin/findssl.sh",
+        "usr/bin/scp",
+        "usr/bin/sftp",
+        "usr/bin/ssh-add",
+        "usr/bin/ssh-agent",
+        "usr/bin/ssh-copy-id",
+        "usr/bin/ssh-keyscan",
+        "usr/bin/ssh-pkcs11-helper"
+      ]
+    },
+    {
+      "name": "openssh-client-default",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "openssh-keygen=10.3_p1-r2 openssh-client-common=10.3_p1-r2 !openssh-client-krb5 so:libc.musl-x86_64.so.1 so:libcrypto.so.3 so:libz.so.1",
+      "provides": "openssh-client=10.3_p1-r2 cmd:ssh=10.3_p1-r2",
+      "installed_files": [
+        "usr/bin/ssh"
+      ]
+    },
+    {
+      "name": "openssh-keygen",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "libcrypto3>=3.1.0 so:libc.musl-x86_64.so.1 so:libcrypto.so.3",
+      "provides": "cmd:ssh-keygen=10.3_p1-r2",
+      "installed_files": [
+        "usr/bin/ssh-keygen"
+      ]
+    },
+    {
+      "name": "openssh-server",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "openssh-keygen=10.3_p1-r2 openssh-server-common=10.3_p1-r2 /bin/sh so:libc.musl-x86_64.so.1 so:libcrypto.so.3 so:libz.so.1",
+      "provides": "cmd:sshd=10.3_p1-r2",
+      "installed_files": [
+        "usr/lib/ssh/sshd-auth",
+        "usr/lib/ssh/sshd-session",
+        "usr/sbin/sshd"
+      ]
+    },
+    {
+      "name": "openssh-server-common",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "",
+      "provides": "",
+      "installed_files": [
+        "etc/ssh/sshd_config"
+      ]
+    },
+    {
+      "name": "openssh-sftp-server",
+      "from": "10.3_p1-r1",
+      "to": "10.3_p1-r2",
+      "depends": "so:libc.musl-x86_64.so.1",
+      "provides": "",
+      "installed_files": [
+        "usr/lib/ssh/sftp-server"
+      ]
+    }
+  ],
+  "new_files": [
+    "etc/ssh/moduli",
+    "etc/ssh/ssh_config",
+    "etc/ssh/sshd_config",
+    "usr/bin/findssl.sh",
+    "usr/bin/scp",
+    "usr/bin/sftp",
+    "usr/bin/ssh",
+    "usr/bin/ssh-add",
+    "usr/bin/ssh-agent",
+    "usr/bin/ssh-copy-id",
+    "usr/bin/ssh-keygen",
+    "usr/bin/ssh-keyscan",
+    "usr/bin/ssh-pkcs11-helper",
+    "usr/lib/libbrotlicommon.so.1",
+    "usr/lib/libbrotlicommon.so.1.2.1",
+    "usr/lib/libbrotlidec.so.1",
+    "usr/lib/libbrotlidec.so.1.2.1",
+    "usr/lib/libbrotlienc.so.1",
+    "usr/lib/libbrotlienc.so.1.2.1",
+    "usr/lib/libcurl.so.4",
+    "usr/lib/libcurl.so.4.8.0",
+    "usr/lib/libexpat.so.1",
+    "usr/lib/libexpat.so.1.13.1",
+    "usr/lib/ssh/sftp-server",
+    "usr/lib/ssh/ssh-pkcs11-helper",
+    "usr/lib/ssh/sshd-auth",
+    "usr/lib/ssh/sshd-session",
+    "usr/sbin/sshd"
+  ],
+  "signing_key": "alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"
+}
