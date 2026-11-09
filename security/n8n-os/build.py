@@ -15,20 +15,28 @@ def sha(p):
         for b in iter(lambda:f.read(MIB),b''):h.update(b)
     return h.hexdigest()
 
-def bounded(cmd,seconds=30,limit=MIB,watch=None):
+def bounded(cmd,seconds=30,limit=MIB,watch=None,*,label="command",absolute_deadline=None):
+    started=time.monotonic()
+    deadline=min(started+seconds,absolute_deadline) if absolute_deadline is not None else started+seconds
+    def timeout():return RuntimeError(f"{label}: wall-clock limit exceeded after {time.monotonic()-started:.3f}s")
+    if started>=deadline:raise timeout()
     p=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    sel=selectors.DefaultSelector();out={1:bytearray(),2:bytearray()};deadline=time.monotonic()+seconds;next_watch=0
+    sel=selectors.DefaultSelector();out={1:bytearray(),2:bytearray()};next_watch=0
     for stream,n in [(p.stdout,1),(p.stderr,2)]:os.set_blocking(stream.fileno(),False);sel.register(stream,selectors.EVENT_READ,n)
     try:
         while sel.get_map():
-            if time.monotonic()>deadline:raise RuntimeError('Wall-clock limit exceeded')
+            if time.monotonic()>=deadline:raise timeout()
             if watch and time.monotonic()>=next_watch:watch();next_watch=time.monotonic()+1
-            for key,_ in sel.select(.2):
+            if time.monotonic()>=deadline:raise timeout()
+            for key,_ in sel.select(min(.2,max(0,deadline-time.monotonic()))):
                 b=os.read(key.fileobj.fileno(),65536)
                 if not b:sel.unregister(key.fileobj);continue
                 out[key.data].extend(b)
-                if len(out[key.data])>limit:raise RuntimeError('Captured output limit exceeded')
-        if p.wait(timeout=max(.1,deadline-time.monotonic())):raise RuntimeError('Command failed: '+bytes(out[2][-16384:]).decode(errors='replace'))
+                if len(out[key.data])>limit:raise RuntimeError(label+': captured output limit exceeded')
+        if time.monotonic()>=deadline:raise timeout()
+        try:code=p.wait(timeout=deadline-time.monotonic())
+        except subprocess.TimeoutExpired:raise timeout()
+        if code:raise RuntimeError(label+': command failed: '+bytes(out[2][-16384:]).decode(errors='replace'))
         return bytes(out[1])
     finally:
         if p.poll() is None:p.kill();p.wait(timeout=5)
@@ -176,14 +184,38 @@ def main():
         phase='offline-os-transaction'
         cid=create('patch',INPUT['base'],['/usr/bin/node','/tmp/fixture/patch.cjs'],[f'type=bind,src={HERE},dst=/tmp/fixture,readonly',f'type=bind,src={install},dst=/tmp/apks,readonly',f'type=bind,src={tool},dst=/tmp/tools/apk,readonly',f'type=bind,src={keys},dst=/tmp/keys,readonly'],user='0:0',patch=True)
         validate_patch_hostconfig(inspect('container',cid)['HostConfig'])
-        result['disk_watch']={'minimum_free_bytes':shutil.disk_usage(tmp).free,'maximum_writable_bytes':0,'kernel_quota':False}
-        def watch():
-            info=json.loads(bounded(['docker','container','inspect','--size',cid],seconds=2))[0]
-            free=shutil.disk_usage(tmp).free
-            result['disk_watch']['minimum_free_bytes']=min(result['disk_watch']['minimum_free_bytes'],free)
-            result['disk_watch']['maximum_writable_bytes']=max(result['disk_watch']['maximum_writable_bytes'],info['SizeRw'])
-            validate_watch(free,info['SizeRw'])
-        patch=bounded(['docker','start','--attach',cid],300,8*MIB,watch)
+        result['disk_watch']={'minimum_free_bytes':shutil.disk_usage(tmp).free,'maximum_writable_bytes':None,'kernel_quota':False,'completed_samples':0,'query_timeout_seconds':2,'quiescent_query_timeout_seconds':10,'interval_seconds':1}
+        transaction_deadline=time.monotonic()+300
+        def watch(quiescent=False):
+            record=result['disk_watch'];started=time.monotonic()
+            record['last_query_state']='pending'
+            try:
+                free=shutil.disk_usage(tmp).free
+                record['minimum_free_bytes']=min(record['minimum_free_bytes'],free)
+                validate_watch(free,0)
+                info=json.loads(bounded(['docker','container','inspect','--size',cid],seconds=10 if quiescent else 2,
+                    label='quiescent size inspection' if quiescent else 'running size inspection',
+                    absolute_deadline=None if quiescent else transaction_deadline))[0]
+                if quiescent and (info.get('State',{}).get('Status')!='created' or info['State'].get('Running') is not False):
+                    raise RuntimeError('Quiescent size check requires never-started container')
+                size=info.get('SizeRw')
+                if type(size) is not int:raise RuntimeError('Missing or invalid SizeRw measurement')
+                free=shutil.disk_usage(tmp).free
+                record['minimum_free_bytes']=min(record['minimum_free_bytes'],free)
+                record['maximum_writable_bytes']=max(record['maximum_writable_bytes'] or 0,size)
+                record['completed_samples']+=1
+                validate_watch(free,size)
+                record['last_query_state']='passed'
+            except Exception as exc:
+                record['last_query_state']='failed';record['last_query_error']=str(exc)
+                raise
+            finally:record['last_query_seconds']=time.monotonic()-started
+        watch(quiescent=True) # Read before start; no guarantee of cache warmth.
+        result['disk_watch']['quiescent_query_seconds']=result['disk_watch']['last_query_seconds']
+        transaction_deadline=time.monotonic()+300
+        patch=bounded(['docker','start','--attach',cid],300,8*MIB,watch,
+            label='offline APK transaction',absolute_deadline=transaction_deadline)
+        watch() # Require a final valid size observation before accepting the manifest.
         info=inspect('container',cid)
         if info['State']['Running'] or info['State']['ExitCode']!=0:raise RuntimeError('OS transaction failed')
         manifest=json.loads(patch)
