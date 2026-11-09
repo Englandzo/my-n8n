@@ -1,0 +1,25 @@
+name: Offline n8n image smoke
+on:
+  push:
+    branches: [security/n8n-2-38-4-image-smoke]
+    paths:
+      - .github/workflows/n8n-image-smoke.yml
+      - security/n8n-smoke/**
+permissions:
+  contents: read
+concurrency:
+  group: n8n-image-smoke-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.repository == 'Englandzo/my-n8n' && github.ref == 'refs/heads/security/n8n-2-38-4-image-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Test public image with synthetic data only
+        shell: bash
+        run: bash security/n8n-smoke/run.sh

@@ -1,0 +1,11 @@
+{
+  "id": "fixtureSmoke2384",
+  "name": "Offline synthetic arithmetic smoke",
+  "active": false,
+  "settings": {"executionOrder": "v1"},
+  "nodes": [
+    {"id": "manual", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {}},
+    {"id": "expression", "name": "Benign Expression", "type": "n8n-nodes-base.set", "typeVersion": 1, "position": [240, 0], "parameters": {"keepOnlySet": true, "values": {"number": [{"name": "answer", "value": "={{ 6 * 7 }}"}], "string": [{"name": "marker", "value": "offline-fixture-only"}]}, "options": {}}}
+  ],
+  "connections": {"Manual Trigger": {"main": [[{"node": "Benign Expression", "type": "main", "index": 0}]]}}
+}
