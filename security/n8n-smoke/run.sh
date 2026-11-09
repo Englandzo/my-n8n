@@ -24,6 +24,7 @@ timeout 300 docker pull --platform linux/amd64 "$image"
 args=(--platform linux/amd64 --network none --user 1000:1000 --cap-drop ALL
   --security-opt no-new-privileges --read-only --pids-limit 256 --memory 3g --cpus 2
   --tmpfs /home/node/.n8n:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=512m
+  --tmpfs /home/node/.cache:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=128m
   --tmpfs /tmp:rw,nosuid,nodev,uid=1000,gid=1000,mode=1777,size=512m
   -e DB_TYPE=sqlite -e EXECUTIONS_MODE=regular
   -e N8N_ENCRYPTION_KEY=synthetic-fixture-only-not-a-real-secret
