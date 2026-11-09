@@ -1,0 +1,37 @@
+name: Offline n8n public image vulnerability scan
+on:
+  push:
+    branches: [security/n8n-2-38-4-image-smoke]
+    paths:
+      - .github/workflows/n8n-image-scan.yml
+      - security/n8n-scan/**
+permissions:
+  contents: read
+concurrency:
+  group: n8n-public-image-scan-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  scan:
+    if: github.repository == 'Englandzo/my-n8n' && github.ref == 'refs/heads/security/n8n-2-38-4-image-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Download public databases and analyze image offline
+        run: python3 security/n8n-scan/run.py
+      - name: Distinguish incomplete scans from security findings
+        if: ${{ always() && !cancelled() }}
+        run: python3 security/n8n-scan/gate.py
+      - name: Preserve bounded public-image evidence
+        if: ${{ always() && !cancelled() && hashFiles('scan-evidence/UPLOAD_READY') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: n8n-public-image-scan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scan-evidence/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          include-hidden-files: false
