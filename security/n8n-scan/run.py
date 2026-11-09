@@ -25,12 +25,22 @@ SCANNER = 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41
 TARGET = 'n8nio/n8n@sha256:5d9f0cc5672b83d438c465f718077af463828c15563a480ef5c7c5fdfa2eae9c'
 EXPECTED_CHILD = 'sha256:553e3e97d163e4185792e5ac17da9ac50a90d22f26d7a7404feaf5db81ee1f0f'
 OPTIONS = ['image', '--cache-dir', '/cache', '--input', '/input/image.tar',
-           '--scanners', 'vuln', '--pkg-types', 'os,library', '--include-dev-deps', '--offline-scan',
+           '--scanners', 'vuln', '--pkg-types', 'os,library', '--offline-scan',
            '--skip-db-update', '--skip-java-db-update', '--skip-version-check',
            '--disable-telemetry', '--ignorefile', '', '--ignore-unfixed=false',
            '--severity', 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL', '--list-all-pkgs',
            '--parallel', '2', '--format', 'json', '--exit-code', '0',
            '--timeout', '10m', '--no-progress']
+
+def validate_image_flags(help_text):
+    # Verify the actual pinned image subcommand, not just generic flag definitions.
+    expected = {x.split('=', 1)[0] for x in OPTIONS if x.startswith('--')}
+    expected |= {'--download-db-only', '--db-repository', '--download-java-db-only', '--java-db-repository'}
+    available = set(re.findall(r'--[a-z][a-z0-9-]*', help_text))
+    missing = expected - available
+    if missing:
+        raise RuntimeError('Unsupported image flags: ' + ', '.join(sorted(missing)))
+    return sorted(expected)
 
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -173,6 +183,15 @@ def main():
         start(cid, 30, evidence/'scanner-version.txt', MIB, evidence/'version.log')
         if not re.search(r'^Version: 0\.76\.2$', (evidence/'scanner-version.txt').read_text(), re.M):
             raise RuntimeError('Scanner version mismatch')
+        stage = 'scanner-image-help'
+        cid = create('help', 'none', [], ['image', '--help'])
+        start(cid, 30, temp/'image-help.txt', MIB//2, evidence/'version.log')
+        help_bytes = (temp/'image-help.txt').read_bytes()
+        status['verified_image_flags'] = validate_image_flags(help_bytes.decode())
+        status['image_help_sha256'] = hashlib.sha256(help_bytes).hexdigest()
+        status['installed_package_scope_source'] = 'https://github.com/aquasecurity/trivy/blob/v0.76.2/pkg/commands/app.go'
+        with (evidence/'scanner-version.txt').open('ab') as f:
+            f.write(b'\n--- Exact image subcommand help ---\n' + help_bytes)
         stage = 'public-database-download'
         downloads = [
             ('vuln', 'db', 'trivy.db', '--download-db-only --db-repository ghcr.io/aquasecurity/trivy-db:2'),
